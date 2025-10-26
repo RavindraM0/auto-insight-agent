@@ -1,0 +1,12 @@
+streamlit
+pandas
+duckdb
+plotly
+networkx
+pyvis
+reportlab
+scikit-learn
+ydata-profiling
+transformers
+torch
+sentencepiece
