@@ -2,50 +2,53 @@ import re
 import pandas as pd
 from pandasql import sqldf
 
-# --- Function: Generate SQL query based on user question ---
-def generate_sql_query(user_question: str, df: pd.DataFrame) -> str:
-    """
-    Converts simple natural language questions into SQL queries
-    using rule-based pattern matching.
-    """
-    question = user_question.lower()
-
-    # Default query
-    sql_query = "SELECT * FROM data LIMIT 10;"
-
-    if "count" in question:
-        sql_query = "SELECT COUNT(*) FROM data;"
-    elif "average" in question or "mean" in question:
-        # Try to find numeric column
-        numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
-        if len(numeric_cols) > 0:
-            sql_query = f"SELECT AVG({numeric_cols[0]}) as average_{numeric_cols[0]} FROM data;"
-    elif "max" in question or "highest" in question:
-        numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
-        if len(numeric_cols) > 0:
-            sql_query = f"SELECT MAX({numeric_cols[0]}) as max_{numeric_cols[0]} FROM data;"
-    elif "min" in question or "lowest" in question:
-        numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
-        if len(numeric_cols) > 0:
-            sql_query = f"SELECT MIN({numeric_cols[0]}) as min_{numeric_cols[0]} FROM data;"
-    elif "show" in question or "display" in question:
-        sql_query = "SELECT * FROM data LIMIT 10;"
-    elif "top" in question:
-        limit = re.findall(r'\d+', question)
-        limit = int(limit[0]) if limit else 5
-        sql_query = f"SELECT * FROM data LIMIT {limit};"
-
-    return sql_query
-
-
-# --- Function: Execute SQL query safely ---
-def execute_query(sql_query: str, df: pd.DataFrame):
-    """
-    Executes an SQL query against the dataframe using pandasql.
-    """
+# ✅ Safely executes the query using pandasql
+def execute_query(query: str, df: pd.DataFrame):
     try:
-        result = sqldf(sql_query, {"data": df})
+        result = sqldf(query, {"data": df})
         return result
     except Exception as e:
-        print(f"Error executing query: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame({"Error": [str(e)]})
+
+# ✅ Generates multiple relevant SQL queries
+def generate_sql_queries(user_question: str, df: pd.DataFrame):
+    question = user_question.lower()
+    columns = [col.lower() for col in df.columns]
+    queries = []
+
+    # --- General Queries ---
+    if "first" in question or "show" in question and "rows" in question:
+        queries.append("SELECT * FROM data LIMIT 10;")
+
+    if "count" in question and "job" in question:
+        queries.append("SELECT COUNT(*) AS total_jobs FROM data;")
+
+    if "average" in question or "avg" in question:
+        for col in columns:
+            if "salary" in col:
+                queries.append(f"SELECT AVG({col}) AS avg_salary FROM data;")
+
+    if "top" in question or "highest" in question:
+        for col in columns:
+            if "salary" in col:
+                queries.append(f"SELECT * FROM data ORDER BY {col} DESC LIMIT 10;")
+
+    if "remote" in question:
+        if any("job" in col for col in columns):
+            queries.append("SELECT * FROM data WHERE job_type LIKE '%remote%';")
+
+    if "location" in question or "city" in question:
+        for col in columns:
+            if "location" in col:
+                queries.append(f"SELECT {col}, COUNT(*) AS total_jobs FROM data GROUP BY {col} ORDER BY total_jobs DESC LIMIT 5;")
+
+    if "company" in question:
+        for col in columns:
+            if "company" in col:
+                queries.append(f"SELECT {col}, COUNT(*) AS total_jobs FROM data GROUP BY {col} ORDER BY total_jobs DESC LIMIT 5;")
+
+    # --- Fallback: just show preview ---
+    if not queries:
+        queries.append("SELECT * FROM data LIMIT 10;")
+
+    return queries
