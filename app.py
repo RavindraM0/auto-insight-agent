@@ -1,80 +1,86 @@
 import streamlit as st
 import pandas as pd
-from agents.cleaner_agent import clean_data
-from agents.query_agent import nl_to_sql, execute_sql
-from agents.visualize_agent import auto_visualize_from_df
-from agents.auto_agent import autonomous_analysis
-from utils.dashboard_generator import save_dashboard_html
-from utils.report_generator import generate_pdf_report
+import plotly.express as px
+import speech_recognition as sr
+from agents.query_agent import generate_sql_query, execute_query
 
-st.set_page_config(page_title="Auto-Insight Agent Pro", layout="wide")
-st.title("Auto-Insight Agent Pro")
+st.set_page_config(page_title="Auto Insight Agent Pro", layout="wide")
 
-uploaded = st.file_uploader("Upload CSV", type=["csv"])
-if st.button("Load sample dataset"):
-    uploaded = "sample_data/retail_sales.csv"  
+st.title("🧩 DataMind AI — Intelligent Data Companion")
+st.markdown("""
+<h4 style='text-align:center; color:#4a90e2;'>
+🧠 Understand &nbsp; | &nbsp; 💬 Query &nbsp; | &nbsp; 📊 Visualize &nbsp; | &nbsp; ⚡ Instantly
+</h4>
+""", unsafe_allow_html=True)
 
-if uploaded:
-    if isinstance(uploaded, str):
-        df = pd.read_csv(uploaded)
-    else:
-        df = pd.read_csv(uploaded)
 
-    st.subheader("Raw data (first 10 rows)")
-    st.dataframe(df.head(10))
+# --- Upload CSV ---
+uploaded_file = st.file_uploader("📂 Upload a CSV file", type=["csv"])
 
-    st.subheader("Cleaning")
-    cleaned_df, corrections = clean_data(df.copy())
-    st.success("Data cleaned.")
-    st.dataframe(cleaned_df.head(10))
-    if corrections:
-        st.markdown("**Corrections performed**")
-        for c in corrections:
-            st.markdown(f"- {c}")
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    
+    # Data cleaning
+    df = df.drop_duplicates()
+    df = df.fillna(method='ffill').fillna(0)
+    st.success("✅ Data cleaned — duplicates removed, nulls handled.")
 
-    st.subheader("Profile (quick)")
-    if st.button("Show profile"):
-        from ydata_profiling import ProfileReport
-        profile = ProfileReport(cleaned_df, minimal=True)
-        st.components.v1.html(profile.to_html(), height=700, scrolling=True)
+    st.subheader("📊 Data Preview")
+    st.dataframe(df.head())
 
-    st.subheader("Ask a question (Natural language → SQL)")
-    query = st.text_input("Example: 'Total sales by region for 2023'")
+    # --- User question section ---
+    st.subheader("💬 Ask a question about your data")
+    user_question = st.text_input("Type your question here (e.g., 'Show top 5 rows', 'Average salary')")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        run_query = st.button("Run query")
-    with col2:
-        save_dashboard = st.button("Generate dashboard HTML")
-    with col3:
-        gen_report = st.button("Generate PDF report")
-
-    if run_query and query:
-        with st.spinner("Generating SQL (local Flan-T5)..."):
-            sql = nl_to_sql(query, cleaned_df)
-        st.markdown("**Generated SQL:**")
-        st.code(sql)
+    # --- Voice input ---
+    if st.button("🎙️ Speak your question"):
+        recognizer = sr.Recognizer()
+        with sr.Microphone() as source:
+            st.info("🎧 Listening... please speak clearly.")
+            audio = recognizer.listen(source)
         try:
-            res = execute_sql(sql, cleaned_df)
-            st.dataframe(res.head(200))
-            fig = auto_visualize_from_df(res)
-            st.plotly_chart(fig, use_container_width=True)
+            user_question = recognizer.recognize_google(audio)
+            st.success(f"🗣️ You said: {user_question}")
         except Exception as e:
-            st.error(f"Execution/visualization error: {e}")
+            st.error(f"Speech recognition error: {e}")
 
-    if save_dashboard:
-        out = save_dashboard_html(cleaned_df, "dashboard.html")
-        st.success(f"Dashboard saved: {out}")
+    if user_question:
+        with st.spinner("🧠 Understanding your question and generating query..."):
+            sql_query = generate_sql_query(user_question, df)
+        st.code(sql_query, language="sql")
 
-    if gen_report:
-        outp = generate_pdf_report(cleaned_df, "report.pdf")
-        st.success(f"PDF report generated: {outp}")
+        # Execute query
+        result = execute_query(sql_query, df)
 
-    st.subheader("Agentic Mode")
-    if st.button("Run Autonomous Mode"):
-        report = autonomous_analysis(cleaned_df)
-        st.markdown("**Autonomous Analysis:**")
-        for line in report:
-            st.markdown(f"- {line}")
+        if not result.empty:
+            st.success("✅ Query executed successfully!")
+            st.dataframe(result)
 
-st.sidebar.markdown("Made with ❤️By RAVINDRA MO")
+            # --- Visualization Section ---
+            st.subheader("📈 Visualization")
+
+            # Automatically detect numeric columns for plotting
+            numeric_cols = result.select_dtypes(include=['int64', 'float64']).columns
+            non_numeric_cols = result.select_dtypes(exclude=['int64', 'float64']).columns
+
+            if len(numeric_cols) >= 1 and len(non_numeric_cols) >= 1:
+                x_col = st.selectbox("Choose X-axis (categorical)", non_numeric_cols)
+                y_col = st.selectbox("Choose Y-axis (numeric)", numeric_cols)
+                chart_type = st.selectbox("Select chart type", ["Bar", "Line", "Scatter", "Pie"])
+
+                if chart_type == "Bar":
+                    fig = px.bar(result, x=x_col, y=y_col, title=f"{chart_type} Chart of {y_col} vs {x_col}")
+                elif chart_type == "Line":
+                    fig = px.line(result, x=x_col, y=y_col, title=f"{chart_type} Chart of {y_col} vs {x_col}")
+                elif chart_type == "Scatter":
+                    fig = px.scatter(result, x=x_col, y=y_col, title=f"{chart_type} Plot of {y_col} vs {x_col}")
+                elif chart_type == "Pie" and len(numeric_cols) > 0:
+                    fig = px.pie(result, names=x_col, values=y_col, title=f"Pie Chart of {y_col} by {x_col}")
+                st.plotly_chart(fig, use_container_width=True)
+
+            else:
+                st.info("⚠️ Not enough numeric/categorical columns for visualization.")
+        else:
+            st.error("❌ No results or invalid query.")
+else:
+    st.warning("📥 Please upload a CSV to start.")
